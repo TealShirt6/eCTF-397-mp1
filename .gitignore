@@ -1,0 +1,6 @@
+target
+# editor artifacts
+.zed
+.neoconf.json
+*.vim
+**/.idea
