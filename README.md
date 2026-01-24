@@ -17,3 +17,4 @@ Detailed instructions in [syllabus](https://sigpwny.com/2026-ectf-syllabus).
 ## Pointers
 - UART example: https://github.com/embassy-rs/embassy/blob/main/examples/mspm0l2228/src/bin/uart.rs
 - LED blink: https://github.com/embassy-rs/embassy/blob/main/examples/mspm0l2228/src/bin/blinky.rs
+- For delay: [`cortex_m::asm::delay`](https://docs.rs/cortex-m/latest/cortex_m/asm/fn.delay.html)
