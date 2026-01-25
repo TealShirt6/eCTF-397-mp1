@@ -1,21 +1,28 @@
 #![no_std]
 #![no_main]
 
+use core::marker::PhantomData;
+
 use cortex_m_rt::entry;
 use defmt::*;
-use embassy_mspm0::{trng::Trng, uart::Uart};
+use embassy_mspm0::trng::Trng;
 use rand_core::{TryRngCore, CryptoRng};
 use {defmt_rtt as _, panic_halt as _};
 
-pub struct Unbound;
-pub struct Locked;
-pub struct Unlocked;
+trait VaultState {}
+struct Unbound;
+struct Locked;
+struct Unlocked;
 
-pub struct Vault<Locked> {
+impl VaultState for Unbound {}
+impl VaultState for Locked {}
+impl VaultState for Unlocked {}
+
+struct Vault<State: VaultState> {
     pin: [u8; 2],
     failed_attempts: u32,
     secret: &'static str,
-    _state: core::marker::PhantomData<Locked>,
+    _state: PhantomData<State>,
 }
 
 impl Default for Vault<Unbound> {
