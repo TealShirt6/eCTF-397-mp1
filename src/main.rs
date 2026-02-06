@@ -6,7 +6,7 @@ use core::marker::PhantomData;
 
 use embassy_mspm0::gpio::{Level, Output};
 use cortex_m::asm::delay;
-use embassy_mspm0::uart::{Config, Uart, Error};
+use embassy_mspm0::uart::{Config, Uart};
 
 
 use cortex_m_rt::entry;
@@ -101,8 +101,12 @@ fn main() -> ! {
     let rx = p.PA11;
 
     let config = Config::default();
-    let mut uart = unwrap!(Uart::new_blocking(instance, rx, tx, config));
+    let mut uart: Uart<'_, embassy_mspm0::mode::Blocking> = unwrap!(Uart::new_blocking(instance, rx, tx, config));
 
+    fn print_invalid_command(uart: &mut Uart<'_, embassy_mspm0::mode::Blocking>) {
+        let error_string = "Invalid Command".as_bytes();
+        unwrap!(uart.blocking_write(&error_string));
+    };
 
     let mut trng = Trng::new(p.TRNG).expect("Failed to initialize TRNG");
 
@@ -113,19 +117,34 @@ fn main() -> ! {
 
     loop {
         let vault: Vault<Unbound> = Default::default();
-        let mut buf: [u8; _] = [0u8; 3];
+        
+        fn read_x(uart: &mut Uart<'_, embassy_mspm0::mode::Blocking>) -> bool {
+            let mut buf: [u8; _] = [0u8; 1];
 
-        // Wait for 'x', continue if different character recieved
-        // buf len is 3 to read in all 3 bytes of x\r\n
-        unwrap!(uart.blocking_read(&mut buf));
-        unwrap!(uart.blocking_write(&buf));
-        if buf[0] != b'x' { continue }
+            unwrap!(uart.blocking_read(&mut buf));
+            if buf[0] != b'x' { return false; }
 
+            unwrap!(uart.blocking_read(&mut buf));
+            if buf[0] != b'\r' { return false; }
 
-        let pin = generate_pin(trng.unwrap_mut());
+            unwrap!(uart.blocking_read(&mut buf));
+            if buf[0] != b'\n' { return false; }
+
+            return true
+        };
+
+        // Check whether we recieved bytes x\r\n
+        if !read_x(&mut uart) {
+            print_invalid_command(&mut uart);
+            continue
+        }
+
+        let pin: [u8; 2] = generate_pin(trng.unwrap_mut());
         let mut vault = vault.bind(pin);
 
-        
+        // Notify that the device is bound
+        let bound_string = "Device Bound".as_bytes();
+        unwrap!(uart.blocking_write(&bound_string));
 
         // Blink LED to show pin
         for i in 0..2 {
@@ -139,47 +158,77 @@ fn main() -> ! {
         }
 
         let vault = loop {
-            let mut buf: [u8; _] = [0u8; 5];
+            fn get_pin_attempt(uart: &mut Uart<'_, embassy_mspm0::mode::Blocking>) -> Result<[u8; 2], ()> {
+                let mut buf: [u8; _] = [0u8; 1];
+                let mut pin_buf: [u8; 2] = [0u8; 2];
 
-            // Reads 5 bytes
-            // Check for errors
-            match uart.blocking_read(&mut buf) {
-                Ok(e) => {info!("{}", e)}
-                Err(Error::Overrun) => {
-                    info!("Overrun, buf: {}", buf)
-                }
-                Err(_) => {}
-            }
+                unwrap!(uart.blocking_read(&mut buf));
+                if buf[0] != b'g' { return Err(()); }
 
-            unwrap!(uart.blocking_write(&buf));
-            if (buf[0] != b'g') { continue }
-            let mut pin: [u8; 2] = (&buf[1..3]).try_into().unwrap();
-            pin = pin.map(|v| v - 48);
-            info!("pin: {}", pin);
-            match vault.unlock(pin) {
-                Ok(unlocked_vault) => break unlocked_vault,
-                Err(locked_vault) => vault = locked_vault,
-            }
+                unwrap!(uart.blocking_read(&mut pin_buf));
+                
+                unwrap!(uart.blocking_read(&mut buf));
+                if buf[0] != b'\r' { return Err(()); }
+
+                unwrap!(uart.blocking_read(&mut buf));
+                if buf[0] != b'\n' { return Err(()); }
+
+                pin_buf = pin_buf.map(|v| v - 48);
+
+                return Ok(pin_buf);
+            };
             
-            let err_string = ("Incorrect pin\r\n").as_bytes();
-            unwrap!(uart.blocking_write(&err_string));
+            match get_pin_attempt(&mut uart) {
+                Ok(pin) => {
+                    match vault.unlock(pin) {
+                        Ok(unlocked_vault) => break unlocked_vault,
+                        Err(locked_vault) => {
+                            vault = locked_vault;
+                            let err_string = ("Incorrect pin\r\n").as_bytes();
+                            unwrap!(uart.blocking_write(&err_string));
+                        }
+                    }
+                }
+                Err(_) => {
+                    print_invalid_command(&mut uart);
+                    continue
+                }
+            }
         };
         loop {
-            let mut buf: [u8; _] = [0u8; 3];
+            let mut get_char = || -> Result<u8, ()> {
+                let mut buf: [u8; _] = [0u8; 1];
+                let char: u8;
 
-            // Wait for 'x', continue if different character recieved
-            unwrap!(uart.blocking_read(&mut buf));
-            unwrap!(uart.blocking_write(&buf));
+                unwrap!(uart.blocking_read(&mut buf));
+                if buf[0] != b'x' { return Err(()); }
 
-            // If inputted 'q', write secret to UART
-            if buf[0] == b'q' {
-                let secret = vault.secret.as_bytes();
-                unwrap!(uart.blocking_write(&secret));
+                char = buf[0];
 
-            // If inputted 'u', break loop
-            } else if buf[0] == b'u' {
-                break
-            }   
+                unwrap!(uart.blocking_read(&mut buf));
+                if buf[0] != b'\r' { return Err(()); }
+
+                unwrap!(uart.blocking_read(&mut buf));
+                if buf[0] != b'\n' { return Err(()); }
+
+                return Ok(char);
+            };
+
+            match get_char() {
+                Ok(b'q') => {
+                    let secret = vault.secret.as_bytes();
+                    unwrap!(uart.blocking_write(&secret));
+                }
+                Ok(b'u') => {
+                    let unlocked_string = "Device Unlocked".as_bytes();
+                    unwrap!(uart.blocking_write(&unlocked_string));
+                    break
+                }
+                Ok(_) | Err(()) => {
+                    print_invalid_command(&mut uart);
+                    continue
+                }
+            }
         }
     }
 }
