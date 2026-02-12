@@ -165,7 +165,15 @@ fn main() -> ! {
                 unwrap!(uart.blocking_read(&mut buf));
                 if buf[0] != b'g' { return Err(()); }
 
-                unwrap!(uart.blocking_read(&mut pin_buf));
+                unwrap!(uart.blocking_read(&mut buf));
+                if buf[0] <= 48 || buf[0] > 52 { return Err(()); }
+
+                pin_buf[0] = buf[0];
+
+                unwrap!(uart.blocking_read(&mut buf));
+                if buf[0] <= 48 || buf[0] > 52 { return Err(()); }
+
+                pin_buf[1] = buf[0];
                 
                 unwrap!(uart.blocking_read(&mut buf));
                 if buf[0] != b'\r' { return Err(()); }
@@ -181,7 +189,11 @@ fn main() -> ! {
             match get_pin_attempt(&mut uart) {
                 Ok(pin) => {
                     match vault.unlock(pin) {
-                        Ok(unlocked_vault) => break unlocked_vault,
+                        Ok(unlocked_vault) => {
+                            let unlocked_string = ("Device unlocked").as_bytes();
+                            unwrap!(uart.blocking_write(&unlocked_string));
+                            break unlocked_vault
+                        } ,
                         Err(locked_vault) => {
                             vault = locked_vault;
                             let err_string = ("Incorrect pin\r\n").as_bytes();
@@ -201,7 +213,7 @@ fn main() -> ! {
                 let char: u8;
 
                 unwrap!(uart.blocking_read(&mut buf));
-                if buf[0] != b'x' { return Err(()); }
+                if buf[0] != b'q' && buf[0] != b'u' { return Err(()); }
 
                 char = buf[0];
 
@@ -219,11 +231,7 @@ fn main() -> ! {
                     let secret = vault.secret.as_bytes();
                     unwrap!(uart.blocking_write(&secret));
                 }
-                Ok(b'u') => {
-                    let unlocked_string = "Device Unlocked".as_bytes();
-                    unwrap!(uart.blocking_write(&unlocked_string));
-                    break
-                }
+                Ok(b'u') => break,
                 Ok(_) | Err(()) => {
                     print_invalid_command(&mut uart);
                     continue
