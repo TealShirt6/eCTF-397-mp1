@@ -121,7 +121,10 @@ fn main() -> ! {
         fn read_x(uart: &mut Uart<'_, embassy_mspm0::mode::Blocking>) -> bool {
             let mut buf: [u8; _] = [0u8; 1];
 
-            unwrap!(uart.blocking_read(&mut buf));
+            match (uart.blocking_read(&mut buf)) {
+                Err(e) => return false,
+                Ok(e) => {}
+            }
             if buf[0] != b'x' { return false; }
 
             unwrap!(uart.blocking_read(&mut buf));
@@ -135,8 +138,9 @@ fn main() -> ! {
 
         // Check whether we recieved bytes x\r\n
         if !read_x(&mut uart) {
-            print_invalid_command(&mut uart);
-            continue
+            let error_string = "Invalid Command".as_bytes();
+            unwrap!(uart.blocking_write(&error_string));
+            continue;
         }
 
         let pin: [u8; 2] = generate_pin(trng.unwrap_mut());
@@ -162,7 +166,10 @@ fn main() -> ! {
                 let mut buf: [u8; _] = [0u8; 1];
                 let mut pin_buf: [u8; 2] = [0u8; 2];
 
-                unwrap!(uart.blocking_read(&mut buf));
+                match (uart.blocking_read(&mut buf)) {
+                Err(e) => return Err(()),
+                Ok(e) => {}
+            }
                 if buf[0] != b'g' { return Err(()); }
 
                 unwrap!(uart.blocking_read(&mut buf));
@@ -212,7 +219,10 @@ fn main() -> ! {
                 let mut buf: [u8; _] = [0u8; 1];
                 let char: u8;
 
-                unwrap!(uart.blocking_read(&mut buf));
+                match (uart.blocking_read(&mut buf)) {
+                Err(e) => return Err(()),
+                Ok(e) => {}
+                }
                 if buf[0] != b'q' && buf[0] != b'u' { return Err(()); }
 
                 char = buf[0];
